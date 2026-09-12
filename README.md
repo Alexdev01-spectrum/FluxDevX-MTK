@@ -39,7 +39,7 @@ The Android side owns `UsbDeviceConnection`. The native layer must not retain a 
 
 ## Auth and DA
 
-`auth_sv5.auth` and DA files are treated as user-supplied authentication/servicing material. FluxDevX-MTK does not patch, forge, bypass, or manufacture authentication. A device requiring SLA/DAA must accept the supplied credentials through the legitimate protocol path. Penumbra documents that devices with SLA may require an engineering preloader or paid/vendor authorization. citeturn0search0turn0search7
+`auth_sv5.auth` and DA files are treated as user-supplied authentication/servicing material. FluxDevX-MTK does not patch, forge, bypass, or manufacture authentication. A device requiring SLA/DAA must accept the supplied credentials through the legitimate protocol path.
 
 ## Planned backend stages
 
@@ -51,8 +51,8 @@ The Android side owns `UsbDeviceConnection`. The native layer must not retain a 
 6. Partition read/backup
 7. Partition write/erase with confirmation, size checks, progress and cancellation
 
-Penumbra's documented DA-mode interface supports partition listing, partition read/write, and erase operations, while its XML DA protocol defines upload/download and progress-report flows. citeturn0search0turn0search11
+Penumbra documents DA-mode partition listing, partition read/write, and erase operations, plus XML DA upload/download and progress-report flows.
 
 ### Safety boundary
 
-No exploit, SLA/DAA bypass, forged signature, FRP/IMEI manipulation, or arbitrary-memory-write interface is included. Destructive partition operations will require an explicit confirmation and validation layer.
+No exploit, SLA/DAA bypass, forged signature, FRP/IMEI manipulation, or arbitrary-memory-write interface is included. Destructive partition operations will require explicit confirmation and validation.
