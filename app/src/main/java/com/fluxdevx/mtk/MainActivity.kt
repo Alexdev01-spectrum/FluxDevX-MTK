@@ -10,9 +10,11 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -32,6 +34,23 @@ class MainActivity : ComponentActivity() {
     private var refresh by mutableIntStateOf(0)
     private var status by mutableStateOf("Waiting for a MediaTek USB device")
     private var probeResults by mutableStateOf<Map<Int, List<UsbProbeResult>>>(emptyMap())
+    private var authFile by mutableStateOf<AuthFile?>(null)
+    private var authError by mutableStateOf<String?>(null)
+
+    private val authPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri == null) return@registerForActivityResult
+        runCatching {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            loadAuthFile(this, uri)
+        }.onSuccess {
+            authFile = it
+            authError = null
+            status = "Loaded ${it.displayName} (${it.sizeBytes} bytes)"
+        }.onFailure {
+            authError = it.message ?: "Could not load authentication file"
+            status = "Authentication file rejected"
+        }
+    }
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -58,7 +77,12 @@ class MainActivity : ComponentActivity() {
         }, Context.RECEIVER_NOT_EXPORTED)
         setContent {
             MaterialTheme {
-                FluxDevXScreen(remember(refresh) { scanMtkDevices() }, status, probeResults, ::requestPermission, ::probeDevice)
+                FluxDevXScreen(
+                    remember(refresh) { scanMtkDevices() }, status, probeResults,
+                    authFile, authError,
+                    ::requestPermission, ::probeDevice,
+                    { authPicker.launch(arrayOf("application/octet-stream", "application/auth", "*/*")) }
+                )
             }
         }
     }
@@ -120,8 +144,10 @@ class MainActivity : ComponentActivity() {
 private fun FluxDevXScreen(
     devices: List<MtkUsbDevice>, status: String,
     probes: Map<Int, List<UsbProbeResult>>,
+    authFile: AuthFile?, authError: String?,
     onRequestPermission: (MtkUsbDevice) -> Unit,
-    onProbe: (MtkUsbDevice) -> Unit
+    onProbe: (MtkUsbDevice) -> Unit,
+    onPickAuth: () -> Unit,
 ) {
     Scaffold(topBar = {
         TopAppBar(title = { Column {
@@ -135,6 +161,14 @@ private fun FluxDevXScreen(
                 Spacer(Modifier.height(6.dp))
                 Text(if (devices.isEmpty()) "Connect a MediaTek device through USB OTG." else "${devices.size} MediaTek USB device(s) detected.")
                 Spacer(Modifier.height(8.dp)); Text(status, style = MaterialTheme.typography.bodySmall)
+            } } }
+            item { Card { Column(Modifier.padding(18.dp)) {
+                Text("Authentication", style = MaterialTheme.typography.titleMedium)
+                Text("Load a manufacturer/vendor-provided auth_sv5.auth file for devices that legitimately require authentication.")
+                Spacer(Modifier.height(10.dp))
+                Button(onClick = onPickAuth) { Text("Select auth_sv5.auth") }
+                authFile?.let { Text("Loaded: ${it.displayName} • ${it.sizeBytes} bytes", style = MaterialTheme.typography.bodySmall) }
+                authError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             } } }
             items(devices, key = { it.device.deviceId }) { item -> Card { Column(Modifier.padding(18.dp)) {
                 Text(item.mode, style = MaterialTheme.typography.titleMedium)
@@ -154,7 +188,7 @@ private fun FluxDevXScreen(
                     }
                 }
             } } }
-            item { Text("Phase 0.2: Android USB enumeration, permission, open/close, and endpoint inspection. No flashing or erase operations.", style = MaterialTheme.typography.bodySmall) }
+            item { Text("Auth files are loaded as opaque user-supplied data. Security bypass or forged authentication is not performed by this layer.", style = MaterialTheme.typography.bodySmall) }
         }
     }
 }
