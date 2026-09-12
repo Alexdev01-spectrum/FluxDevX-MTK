@@ -10,49 +10,59 @@ Standalone Android MediaTek servicing/transport project.
 - BROM/Preloader handshake implementation
 - Read-only hardware/software/SOC/MEID/target-config identification
 - User-supplied `auth_sv5.auth` loading with size validation and SHA-256 metadata
-- User-supplied DA loading with size validation
+- User-supplied Download Agent loading with size validation
 - Standard GPT header/partition-entry parsing
-- Partition image size validation
-- Explicit destructive-operation confirmation helpers
+- MediaTek TXT/XML scatter parsing
+- Scatter-driven partition selection and image-size validation
+- Partition readback/flash orchestration with streaming I/O
 - Protected-partition safeguards for direct erase/write planning
-- Rust/JNI bridge scaffold
+- Penumbra MTK core linked into the Rust/JNI bridge
+- Android `UsbDeviceConnection` adapter for Penumbra's `MtkPort` interface
+- Native partition readback and write entry points
+- GitHub Actions Android build that cross-compiles the ARM64 native bridge
 
 ## Architecture
 
 ```text
 Android UsbManager
        ↓
-UsbDeviceConnection
+UsbDeviceConnection + claimed bulk endpoints
        ↓
-UsbBulkTransport
+Rust Android MtkPort adapter
        ↓
-MtkProtocol
+Penumbra MTK core
        ↓
 BROM / Preloader
        ↓
-Authorized DA session (next backend layer)
+Authorized DA V5/V6 session
        ↓
-GPT / partition operations
+GPT / device partition table
+       ↓
+Scatter-selected partition
+       ↓
+Readback / Flash
 ```
 
-The Android side owns `UsbDeviceConnection`. The native layer must not retain a borrowed file descriptor after that connection is closed.
+The Android side owns the USB connection and endpoints. The Rust bridge calls Android's `UsbDeviceConnection.bulkTransfer()` and `controlTransfer()` through JNI, so Android USB permission remains authoritative.
+
+## Scatter partition manager
+
+The partition manager accepts MediaTek scatter files in both common **TXT** and **XML** representations. A partition is selected explicitly from the parsed scatter and a firmware image is checked against its declared capacity before flashing.
+
+The native backend exposes Penumbra-backed read and write operations. Images are streamed from a temporary file into the native backend rather than copied into the native heap as one large byte array. Readback is written to a temporary file before the Android layer can export it to the selected destination.
 
 ## Auth and DA
 
 `auth_sv5.auth` and DA files are treated as user-supplied authentication/servicing material. FluxDevX-MTK does not patch, forge, bypass, or manufacture authentication. A device requiring SLA/DAA must accept the supplied credentials through the legitimate protocol path.
 
-## Planned backend stages
+The Penumbra integration uses its normal `DeviceBuilder` → `init()` → DA-mode → partition read/write flow. It does not enable Penumbra's exploit feature set.
 
-1. USB transport — implemented
-2. Read-only BROM/Preloader identification — implemented
-3. Penumbra core integration and Android transport adapter
-4. Authenticated DA V5/V6 upload using a user-supplied authorized DA/auth pair
-5. DA session lifecycle and GPT retrieval
-6. Partition read/backup
-7. Partition write/erase with confirmation, size checks, progress and cancellation
+## Build
 
-Penumbra documents DA-mode partition listing, partition read/write, and erase operations, plus XML DA upload/download and progress-report flows.
+The Android application uses the ARM64 Rust bridge. CI installs the Android NDK and Rust target, builds `libfluxdevx_mtk_bridge.so`, places it under `app/src/main/jniLibs/arm64-v8a/`, and then builds the APK.
+
+For local native builds, use Rust stable with the `aarch64-linux-android` target and an Android NDK clang linker. The native bridge is intentionally kept separate from the Compose UI.
 
 ### Safety boundary
 
-No exploit, SLA/DAA bypass, forged signature, FRP/IMEI manipulation, or arbitrary-memory-write interface is included. Destructive partition operations will require explicit confirmation and validation.
+No exploit, SLA/DAA bypass, forged signature, FRP/IMEI manipulation, or arbitrary-memory-write interface is included. Destructive partition operations require explicit selection and validation, and authentication remains dependent on legitimate user-supplied DA/auth material.
