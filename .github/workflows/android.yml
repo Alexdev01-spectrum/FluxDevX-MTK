@@ -1,0 +1,41 @@
+name: Android build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Build Penumbra Android bridge
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang
+        run: |
+          cargo build --manifest-path native/fluxdevx-mtk-bridge/Cargo.toml --release --target aarch64-linux-android
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          cp native/target/aarch64-linux-android/release/libfluxdevx_mtk_bridge.so app/src/main/jniLibs/arm64-v8a/
+
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug
