@@ -7,10 +7,7 @@ import android.hardware.usb.UsbInterface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/**
- * Thin, blocking bulk transport over Android UsbDeviceConnection.
- * Protocol framing stays outside this class so it can later feed Penumbra.
- */
+/** Blocking bulk transport owned by Android's UsbDeviceConnection. */
 class UsbBulkTransport(
     private val connection: UsbDeviceConnection,
     private val usbInterface: UsbInterface,
