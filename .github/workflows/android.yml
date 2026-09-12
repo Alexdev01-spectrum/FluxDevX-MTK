@@ -35,7 +35,7 @@ jobs:
         run: |
           cargo build --manifest-path native/fluxdevx-mtk-bridge/Cargo.toml --release --target aarch64-linux-android
           mkdir -p app/src/main/jniLibs/arm64-v8a
-          cp native/target/aarch64-linux-android/release/libfluxdevx_mtk_bridge.so app/src/main/jniLibs/arm64-v8a/
+          cp native/fluxdevx-mtk-bridge/target/aarch64-linux-android/release/libfluxdevx_mtk_bridge.so app/src/main/jniLibs/arm64-v8a/
 
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug
