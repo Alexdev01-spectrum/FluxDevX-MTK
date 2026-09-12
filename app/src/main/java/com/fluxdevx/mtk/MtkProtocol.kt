@@ -2,12 +2,7 @@ package com.fluxdevx.mtk
 
 import java.io.ByteArrayOutputStream
 
-/**
- * Minimal MediaTek preloader/BROM protocol implementation.
- *
- * This deliberately covers identification and authenticated DA hand-off only.
- * It does not contain exploit, security-bypass, or arbitrary-memory-write code.
- */
+/** Read-only BROM/Preloader identification protocol. */
 class MtkProtocol(private val transport: UsbBulkTransport) {
     companion object {
         private val HANDSHAKE = byteArrayOf(0xA0.toByte(), 0x0A, 0x50, 0x05)
@@ -17,8 +12,6 @@ class MtkProtocol(private val transport: UsbBulkTransport) {
         private const val GET_MEID = 0xE1
         private const val GET_TARGET_CONFIG = 0xD8
         private const val GET_PL_CAPABILITIES = 0xFB
-        private const val SEND_DA = 0xD7
-        private const val JUMP_DA = 0xD5
     }
 
     data class Identity(
@@ -59,24 +52,6 @@ class MtkProtocol(private val transport: UsbBulkTransport) {
         targetConfig = commandU32(GET_TARGET_CONFIG),
         plCapabilities = longArrayOf(commandU32(GET_PL_CAPABILITIES), commandU32(GET_PL_CAPABILITIES)),
     )
-
-    /** Sends an authorized DA payload. The device remains responsible for validating it. */
-    suspend fun sendAuthorizedDa(da: ByteArray): DaTransferResult {
-        require(da.isNotEmpty()) { "DA file is empty" }
-        require(da.size <= 128 * 1024 * 1024) { "DA file is too large" }
-        transport.writeFully(byteArrayOf(SEND_DA.toByte()))
-        // DA framing is device/version-specific. Keep the payload transfer explicit
-        // rather than guessing a V5/V6 header and risking a corrupted transfer.
-        transport.writeFully(da)
-        return DaTransferResult(bytesSent = da.size, requiresDeviceValidation = true)
-    }
-
-    suspend fun jumpDa(address: Long) {
-        transport.writeFully(byteArrayOf(JUMP_DA.toByte()))
-        transport.writeU32(address)
-    }
-
-    data class DaTransferResult(val bytesSent: Int, val requiresDeviceValidation: Boolean)
 
     private suspend fun commandU16(command: Int): Int {
         transport.writeFully(byteArrayOf(command.toByte()))
@@ -132,12 +107,4 @@ suspend fun UsbBulkTransport.readU32(): Long {
         ((b[1].toLong() and 0xFF) shl 16) or
         ((b[2].toLong() and 0xFF) shl 8) or
         (b[3].toLong() and 0xFF)
-}
-
-suspend fun UsbBulkTransport.writeU32(value: Long) {
-    require(value in 0..0xFFFF_FFFFL)
-    writeFully(byteArrayOf(
-        (value ushr 24).toByte(), (value ushr 16).toByte(),
-        (value ushr 8).toByte(), value.toByte()
-    ))
 }
