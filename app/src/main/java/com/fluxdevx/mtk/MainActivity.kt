@@ -22,6 +22,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 
 private const val ACTION_USB_PERMISSION = "com.fluxdevx.mtk.USB_PERMISSION"
 private const val MTK_VID = 0x0E8D
@@ -36,6 +37,15 @@ class MainActivity : ComponentActivity() {
     private var probeResults by mutableStateOf<Map<Int, List<UsbProbeResult>>>(emptyMap())
     private var authFile by mutableStateOf<AuthFile?>(null)
     private var authError by mutableStateOf<String?>(null)
+    private var scatterFile by mutableStateOf<ScatterFile?>(null)
+    private var scatterName by mutableStateOf<String?>(null)
+    private var selectedPartition by mutableStateOf<ScatterPartition?>(null)
+    private var imageUri by mutableStateOf<Uri?>(null)
+    private var imageName by mutableStateOf<String?>(null)
+    private var imageSize by mutableStateOf<Long?>(null)
+    private var operation by mutableStateOf<String?>(null)
+    private var operationProgress by mutableFloatStateOf(0f)
+    private var operationMessage by mutableStateOf("")
 
     private val authPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri == null) return@registerForActivityResult
@@ -50,6 +60,46 @@ class MainActivity : ComponentActivity() {
             authError = it.message ?: "Could not load authentication file"
             status = "Authentication file rejected"
         }
+    }
+
+    private val scatterPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri == null) return@registerForActivityResult
+        runCatching {
+            val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("Could not read scatter file")
+            val name = contentResolver.query(uri, null, null, null, null)?.use { c ->
+                val index = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (c.moveToFirst() && index >= 0) c.getString(index) else null
+            } ?: "scatter"
+            ScatterParser.parse(bytes, name) to name
+        }.onSuccess { (parsed, name) ->
+            require(parsed.partitions.isNotEmpty()) { "No partitions were found in the scatter file" }
+            scatterFile = parsed
+            scatterName = name
+            selectedPartition = null
+            operationMessage = "Loaded ${parsed.partitions.size} partitions from ${parsed.format} scatter."
+        }.onFailure {
+            operationMessage = "Scatter error: ${it.message ?: "invalid scatter file"}"
+        }
+    }
+
+    private val imagePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri == null) return@registerForActivityResult
+        runCatching {
+            val size = contentResolver.query(uri, null, null, null, null)?.use { c ->
+                val index = c.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                if (c.moveToFirst() && index >= 0 && !c.isNull(index)) c.getLong(index) else null
+            } ?: contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
+            val name = contentResolver.query(uri, null, null, null, null)?.use { c ->
+                val index = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (c.moveToFirst() && index >= 0) c.getString(index) else null
+            } ?: "image"
+            name to size
+        }.onSuccess { (name, size) ->
+            imageUri = uri
+            imageName = name
+            imageSize = size
+            operationMessage = "Selected $name${size?.let { " (${it} bytes)" } ?: ""}."
+        }.onFailure { operationMessage = "Image error: ${it.message ?: "could not inspect image"}" }
     }
 
     private val receiver = object : BroadcastReceiver() {
@@ -80,8 +130,15 @@ class MainActivity : ComponentActivity() {
                 FluxDevXScreen(
                     remember(refresh) { scanMtkDevices() }, status, probeResults,
                     authFile, authError,
+                    scatterFile, scatterName, selectedPartition, imageName, imageSize,
+                    operation, operationProgress, operationMessage,
                     ::requestPermission, ::probeDevice,
-                    { authPicker.launch(arrayOf("application/octet-stream", "application/auth", "*/*")) }
+                    { authPicker.launch(arrayOf("application/octet-stream", "application/auth", "*/*")) },
+                    { scatterPicker.launch(arrayOf("text/plain", "text/xml", "application/xml", "*/*")) },
+                    { selectedPartition = it },
+                    { imagePicker.launch(arrayOf("application/octet-stream", "image/*", "*/*")) },
+                    ::requestReadback,
+                    ::requestFlash,
                 )
             }
         }
@@ -137,6 +194,30 @@ class MainActivity : ComponentActivity() {
         } finally { connection.close() }
     }
 
+    private fun requestReadback() {
+        val partition = selectedPartition ?: return
+        operation = "Readback: ${partition.name}"
+        operationProgress = 0f
+        operationMessage = "Readback is staged through PartitionManager. A live DA read callback is required before bytes are requested from the device."
+    }
+
+    private fun requestFlash() {
+        val partition = selectedPartition ?: return
+        val size = imageSize
+        runCatching {
+            require(partition.isDownload) { "${partition.name} is marked is_download: false" }
+            require(size != null) { "Image size is unavailable" }
+            validateScatterImage(partition, size)
+        }.onSuccess {
+            operation = "Flash: ${partition.name}"
+            operationProgress = 0f
+            operationMessage = "Validated $imageName against ${partition.name}. The DA write backend is not connected yet; no device write was attempted."
+        }.onFailure {
+            operation = null
+            operationMessage = "Flash blocked: ${it.message}"
+        }
+    }
+
     override fun onDestroy() { unregisterReceiver(receiver); super.onDestroy() }
 }
 
@@ -145,9 +226,16 @@ private fun FluxDevXScreen(
     devices: List<MtkUsbDevice>, status: String,
     probes: Map<Int, List<UsbProbeResult>>,
     authFile: AuthFile?, authError: String?,
+    scatter: ScatterFile?, scatterName: String?, selectedPartition: ScatterPartition?, imageName: String?, imageSize: Long?,
+    operation: String?, operationProgress: Float, operationMessage: String,
     onRequestPermission: (MtkUsbDevice) -> Unit,
     onProbe: (MtkUsbDevice) -> Unit,
     onPickAuth: () -> Unit,
+    onPickScatter: () -> Unit,
+    onSelectPartition: (ScatterPartition) -> Unit,
+    onPickImage: () -> Unit,
+    onReadback: () -> Unit,
+    onFlash: () -> Unit,
 ) {
     Scaffold(topBar = {
         TopAppBar(title = { Column {
@@ -170,6 +258,41 @@ private fun FluxDevXScreen(
                 authFile?.let { Text("Loaded: ${it.displayName} • ${it.sizeBytes} bytes", style = MaterialTheme.typography.bodySmall) }
                 authError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             } } }
+            item { Card { Column(Modifier.padding(18.dp)) {
+                Text("Scatter partition manager", style = MaterialTheme.typography.titleMedium)
+                Text("Load a MediaTek TXT or XML scatter file, select a partition, then choose its image for validated flashing.")
+                Spacer(Modifier.height(10.dp))
+                Button(onClick = onPickScatter) { Text("Load TXT / XML scatter") }
+                scatterName?.let { Text("Scatter: $it", style = MaterialTheme.typography.bodySmall) }
+            } } }
+            if (scatter != null) {
+                item { Text("${scatter.partitions.size} partitions • ${scatter.format}", style = MaterialTheme.typography.labelLarge) }
+                items(scatter.partitions, key = { it.name }) { partition ->
+                    Card { Column(Modifier.padding(14.dp)) {
+                        Text(partition.name, style = MaterialTheme.typography.titleSmall)
+                        Text("${partition.fileName ?: "No image"} • size=${partition.partitionSize ?: "unknown"} bytes • ${if (partition.isDownload) "downloadable" else "not for download"}", style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(onClick = { onSelectPartition(partition) }) { Text(if (selectedPartition?.name == partition.name) "Selected" else "Select") }
+                    } }
+                }
+            }
+            if (selectedPartition != null) {
+                item { Card { Column(Modifier.padding(18.dp)) {
+                    Text("Selected: ${selectedPartition.name}", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(6.dp))
+                    Button(onClick = onPickImage, enabled = selectedPartition.isDownload) { Text("Select image") }
+                    imageName?.let { Text("Image: $it${imageSize?.let { s -> " ($s bytes)" } ?: ""}", style = MaterialTheme.typography.bodySmall) }
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = onReadback) { Text("Readback") }
+                        Button(onClick = onFlash, enabled = selectedPartition.isDownload && imageName != null) { Text("Flash partition") }
+                    }
+                } } }
+            }
+            item {
+                operation?.let { Text(it, style = MaterialTheme.typography.titleSmall) }
+                if (operation != null) LinearProgressIndicator(progress = { operationProgress }, Modifier.fillMaxWidth())
+                if (operationMessage.isNotBlank()) Text(operationMessage, style = MaterialTheme.typography.bodySmall)
+            }
             items(devices, key = { it.device.deviceId }) { item -> Card { Column(Modifier.padding(18.dp)) {
                 Text(item.mode, style = MaterialTheme.typography.titleMedium)
                 Text("VID 0x%04X  PID 0x%04X".format(item.device.vendorId, item.device.productId))
@@ -188,7 +311,7 @@ private fun FluxDevXScreen(
                     }
                 }
             } } }
-            item { Text("Auth files are loaded as opaque user-supplied data. Security bypass or forged authentication is not performed by this layer.", style = MaterialTheme.typography.bodySmall) }
+            item { Text("Auth files are opaque user-supplied data. Security bypass or forged authentication is not performed by this layer.", style = MaterialTheme.typography.bodySmall) }
         }
     }
 }
