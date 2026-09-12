@@ -1,24 +1,21 @@
 # FluxDevX-MTK 🌘
 
-Standalone Android MediaTek transport and servicing project.
+Standalone Android MediaTek servicing/transport project.
 
-## v0.3 — authenticated transport preparation
+## Current implementation
 
-- Android USB Host enumeration
-- MediaTek VID/PID classification
-- Android USB permission request
-- USB device open/close
-- Interface and endpoint inspection
-- Android bulk transport layer
+- Android USB Host enumeration and MediaTek VID/PID classification
+- Android USB permission handling
+- Bulk USB transport with full-write and exact-read helpers
+- BROM/Preloader handshake implementation
+- Read-only hardware/software/SOC/MEID/target-config identification
+- User-supplied `auth_sv5.auth` loading with size validation and SHA-256 metadata
+- User-supplied DA loading with size validation
+- Standard GPT header/partition-entry parsing
+- Partition image size validation
+- Explicit destructive-operation confirmation helpers
+- Protected-partition safeguards for direct erase/write planning
 - Rust/JNI bridge scaffold
-- User-supplied `auth_sv5.auth` file picker and validation
-- Authentication material kept opaque until a legitimate backend consumes it
-
-## Authentication files
-
-FluxDevX-MTK accepts manufacturer/vendor-provided MediaTek `.auth` / `auth_sv5.auth` files through Android's document picker. The selected file is loaded as bytes with basic size/empty-file validation.
-
-An auth file is **not** a security bypass by itself. The backend must use the file only for the device's supported authentication protocol and report authentication failures cleanly.
 
 ## Architecture
 
@@ -27,28 +24,35 @@ Android UsbManager
        ↓
 UsbDeviceConnection
        ↓
-Android USB transport
+UsbBulkTransport
        ↓
-JNI boundary
+MtkProtocol
        ↓
-AndroidMtkPort
+BROM / Preloader
        ↓
-penumbra-mtk
+Authorized DA session (next backend layer)
        ↓
-MTK protocol / legitimate authentication
+GPT / partition operations
 ```
 
-## Planned servicing stages
+The Android side owns `UsbDeviceConnection`. The native layer must not retain a borrowed file descriptor after that connection is closed.
 
-1. USB enumeration and endpoint inspection — implemented
-2. Android bulk transport — implemented
-3. Read-only BROM/Preloader identification
-4. Penumbra core integration
-5. Legitimate DA session + supplied authentication material
-6. GPT/partition metadata
-7. Partition backup/read
-8. Validated partition write
-9. Validated partition erase
-10. Progress, cancellation, logs, and recovery handling
+## Auth and DA
 
-Security-bypass exploits are intentionally outside the project scope. Devices requiring SLA/DAA authentication should use an appropriate authorized authentication file or vendor-supported authorization path.
+`auth_sv5.auth` and DA files are treated as user-supplied authentication/servicing material. FluxDevX-MTK does not patch, forge, bypass, or manufacture authentication. A device requiring SLA/DAA must accept the supplied credentials through the legitimate protocol path. Penumbra documents that devices with SLA may require an engineering preloader or paid/vendor authorization. citeturn0search0turn0search7
+
+## Planned backend stages
+
+1. USB transport — implemented
+2. Read-only BROM/Preloader identification — implemented
+3. Penumbra core integration and Android transport adapter
+4. Authenticated DA V5/V6 upload using a user-supplied authorized DA/auth pair
+5. DA session lifecycle and GPT retrieval
+6. Partition read/backup
+7. Partition write/erase with confirmation, size checks, progress and cancellation
+
+Penumbra's documented DA-mode interface supports partition listing, partition read/write, and erase operations, while its XML DA protocol defines upload/download and progress-report flows. citeturn0search0turn0search11
+
+### Safety boundary
+
+No exploit, SLA/DAA bypass, forged signature, FRP/IMEI manipulation, or arbitrary-memory-write interface is included. Destructive partition operations will require an explicit confirmation and validation layer.
