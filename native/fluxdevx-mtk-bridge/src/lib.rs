@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::io::Read;
 use std::time::Duration;
 
 use jni::objects::{GlobalRef, JByteArray, JClass, JObject, JString, JValue};
@@ -18,7 +17,7 @@ struct AndroidPort {
 }
 
 impl AndroidPort {
-    fn env(&self) -> Result<JNIEnv<'_>, String> {
+    fn env(&self) -> Result<jni::AttachGuard<'_>, String> {
         self.vm.attach_current_thread().map_err(|e| e.to_string())
     }
 
@@ -162,7 +161,7 @@ fn result_array(env: &mut JNIEnv, result: Result<(), String>) -> jbyteArray {
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_fluxdevx_mtk_NativeBridge_nativeEcho(mut env: JNIEnv, _class: JClass, input: JByteArray) -> jbyteArray {
+pub extern "system" fn Java_com_fluxdevx_mtk_NativeBridge_nativeEcho(env: JNIEnv, _class: JClass, input: JByteArray) -> jbyteArray {
     match env.convert_byte_array(&input) { Ok(bytes) => env.byte_array_from_slice(&bytes).map(|a| a.into_raw()).unwrap_or(std::ptr::null_mut()), Err(_) => std::ptr::null_mut() }
 }
 
