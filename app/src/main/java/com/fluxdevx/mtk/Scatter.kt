@@ -29,7 +29,7 @@ object ScatterParser {
     }
 
     private fun parseTxt(text: String): ScatterFile {
-        val blocks = Regex("(?ms)^\s*partition_index:\s*(.*?)\n(?=\s*partition_index:|\z)")
+        val blocks = Regex("(?ms)^\\s*partition_index:\\s*(.*?)\\n(?=\\s*partition_index:|\\z)")
             .findAll(text).map { it.groupValues[1] }.toList()
         val parts = blocks.mapNotNull { block ->
             val fields = parseFields(block)
@@ -41,7 +41,7 @@ object ScatterParser {
                 physicalAddress = number(fields["physical_start_addr"]),
                 partitionSize = number(fields["partition_size"]),
                 region = fields["region"],
-                isDownload = !fields["is_download"]?.equals("false", true).orDefaultFalse(),
+                isDownload = fields["is_download"]?.equals("false", true) != true,
                 rawAttributes = fields,
             )
         }
@@ -69,7 +69,7 @@ object ScatterParser {
                     physicalAddress = number(map["physical_start_addr"] ?: child("physical_start_addr")),
                     partitionSize = number(map["partition_size"] ?: child("partition_size")),
                     region = map["region"] ?: child("region"),
-                    isDownload = !(map["is_download"] ?: child("is_download"))?.equals("false", true).orDefaultFalse(),
+                    isDownload = (map["is_download"] ?: child("is_download"))?.equals("false", true) != true,
                     rawAttributes = map,
                 ))
             }
@@ -86,8 +86,6 @@ object ScatterParser {
     private fun number(value: String?): Long? = value?.trim()?.removePrefix("0x")?.removePrefix("0X")?.let {
         runCatching { if (value.trim().startsWith("0x", true)) it.toLong(16) else it.toLong() }.getOrNull()
     }
-
-    private fun Boolean?.orDefaultFalse() = this ?: false
 }
 
 private fun org.w3c.dom.NodeList.asList(): List<org.w3c.dom.Node> = buildList {
