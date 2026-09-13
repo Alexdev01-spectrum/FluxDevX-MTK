@@ -6,6 +6,7 @@ plugins {
 
 allprojects {
     tasks.withType<JavaCompile>().configureEach {
-        options.release.set(17)
+        sourceCompatibility = "17"
+        targetCompatibility = "17"
     }
 }
