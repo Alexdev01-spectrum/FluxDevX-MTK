@@ -23,6 +23,11 @@ jobs:
       - name: Install Android SDK components
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
 
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
       - name: Set up Rust nightly
         uses: dtolnay/rust-toolchain@nightly
         with:
@@ -38,4 +43,4 @@ jobs:
           cp native/fluxdevx-mtk-bridge/target/aarch64-linux-android/release/libfluxdevx_mtk_bridge.so app/src/main/jniLibs/arm64-v8a/
 
       - name: Build debug APK
-        run: ./gradlew :app:assembleDebug
+        run: gradle :app:assembleDebug --no-daemon
